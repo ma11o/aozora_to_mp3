@@ -2,7 +2,7 @@
 
 青空文庫のHTML作品ページを自然な日本語音声のMP3に変換するCLIです。Macなどで作成したMP3を任意のプレイヤーで再生し、途中で停止・再開できます（再生位置の保存はプレイヤー側の機能です）。
 
-音声合成には非公式の [edge-tts](https://github.com/rany2/edge-tts) を使用します。インターネット接続が必要で、サービス仕様の変更により動作しなくなる可能性があります。
+音声合成には手元で動く [VOICEVOX ENGINE](https://github.com/VOICEVOX/voicevox_engine) を使用します（既定）。`--engine edge` で非公式の [edge-tts](https://github.com/rany2/edge-tts) も選べますが、2026年10月時点ではサービス側の仕様変更により403エラーで動作しません（[rany2/edge-tts#490](https://github.com/rany2/edge-tts/issues/490)）。
 
 ## セットアップ
 
@@ -12,7 +12,16 @@ Python 3.9以降を用意してください。
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+brew install ffmpeg
 ```
+
+VOICEVOX ENGINE を起動します。Docker を使う場合（初回はイメージ取得に数分かかります）:
+
+```bash
+docker run -d --name voicevox -p 127.0.0.1:50021:50021 --restart unless-stopped voicevox/voicevox_engine:cpu-latest
+```
+
+[VOICEVOX アプリ](https://voicevox.hiroshiba.jp/) を起動している間も同じURL（`http://127.0.0.1:50021`）でエンジンが使えます。
 
 ## 使い方
 
@@ -27,8 +36,8 @@ python aozora_to_mp3.py \
   "https://www.aozora.gr.jp/cards/000879/files/127_15260.html" \
   --preview
 
-# 男性の日本語音声に変更
-python aozora_to_mp3.py "作品URL" -o book.mp3 --voice ja-JP-KeitaNeural
+# 話者を変更（IDは http://127.0.0.1:50021/speakers の styles[].id。例: 8 = 春日部つむぎ）
+python aozora_to_mp3.py "作品URL" -o book.mp3 --speaker 8
 
 # 読み上げ速度を調整
 python aozora_to_mp3.py "作品URL" -o book.mp3 --rate=-5%
@@ -40,7 +49,7 @@ python aozora_to_mp3.py "作品URL" -o book.mp3 --chunk-chars 3000
 python aozora_to_mp3.py ./work.html -o book.mp3
 ```
 
-分割時は `book_001.mp3`、`book_002.mp3` のように出力されます。デフォルトは `ja-JP-NanamiNeural`（女性音声）、読み上げ速度は `-10%` です。
+分割時は `book_001.mp3`、`book_002.mp3` のように出力されます。デフォルトの話者は冥鳴ひまり（ID 14）、読み上げ速度は `-10%` です。生成時間の目安は、CPU版で『羅生門』（約6000文字、音声約18分）が約8分です。
 
 ## 青空文庫のHTMLについて
 
@@ -53,4 +62,4 @@ python aozora_to_mp3.py ./work.html -o book.mp3
 
 * 本ツールは個人利用向けの簡易実装です。長い作品を一つの巨大なMP3として生成するより、`--chunk-chars` を使った分割を推奨します。
 * 音声合成への送信前に、作品の著作権と配布条件を確認してください。青空文庫の掲載作品であってもすべての利用・再配布が自由とは限りません。
-* 音声サービスへの接続を含むエンドツーエンドの動作確認は未実施です。
+* VOICEVOX で作成した音声を公開する場合は「VOICEVOX:冥鳴ひまり」のようなクレジット表記が必要です。条件は話者ごとに異なるため、各キャラクターの利用規約を確認してください。
