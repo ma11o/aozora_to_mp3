@@ -20,7 +20,7 @@ import wave
 from bs4 import BeautifulSoup
 
 
-SPEAKER = 14  # 冥鳴ひまり（ノーマル）。落ち着いた声で朗読向き。
+SPEAKER = 13  # 青山龍星（ノーマル）。低く落ち着いた男性の声で朗読向き。
 
 
 def read_html(source: str) -> bytes:
