@@ -63,3 +63,29 @@ python aozora_to_mp3.py ./work.html -o book.mp3
 * 本ツールは個人利用向けの簡易実装です。長い作品を一つの巨大なMP3として生成するより、`--chunk-chars` を使った分割を推奨します。
 * 音声合成への送信前に、作品の著作権と配布条件を確認してください。青空文庫の掲載作品であってもすべての利用・再配布が自由とは限りません。
 * VOICEVOX で作成した音声を公開する場合は「VOICEVOX:冥鳴ひまり」のようなクレジット表記が必要です。条件は話者ごとに異なるため、各キャラクターの利用規約を確認してください。
+
+## AivisSpeech（追加エンジン）
+
+[AivisSpeech](https://aivis-project.com/speech/)のmacOS版をインストールして起動します。
+エンジン単独なら同梱の実行ファイルを起動できます（初回はモデル取得に時間がかかります）。
+
+```bash
+/Applications/AivisSpeech.app/Contents/Resources/AivisSpeech-Engine/run
+
+# インストール済みモデルのスタイルIDを確認
+python aozora_to_mp3.py --engine aivis --list-speakers
+
+# STYLE_IDを一覧の整数に置き換える。VOICEVOXの話者IDは流用しない
+python aozora_to_mp3.py ./work.html -o book.mp3 \
+  --engine aivis --speaker STYLE_ID --rate=-10% --chunk-chars 3000
+```
+
+接続先は既定で `http://127.0.0.1:10101`、変更は `--aivis-url` です。
+AivisSpeechでは話者を明示指定します。VOICEVOXの既定エンジン・話者は維持しています。
+AudioQueryの本文や独自パラメータを保持して、読み上げ速度だけ変更します。
+MP3出力・分割命名・150文字単位の合成は共通です。
+
+[API調査、朗読向け候補、同じ本文での品質・生成速度比較手順](docs/aivisspeech.md)を参照してください。
+実エンジンでの音声生成・品質評価は未実施です。音声公開条件はAivisHubの各モデルで確認してください。
+
+開発時の検証: `python -m unittest discover -s tests -v`（MP3検証にはffmpegが必要）。
