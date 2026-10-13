@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import io
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -115,16 +116,31 @@ def voicevox_post(url: str, path: str, params: dict, body: bytes = b"") -> bytes
 
 def voicevox_wav(url: str, text: str, speaker: int, speed: float) -> bytes:
     query = json.loads(voicevox_post(url, "/audio_query", {"text": text, "speaker": speaker}))
+    # AivisSpeech の kana（本文）・tempoDynamicsScale 等もそのまま保持する。
     query["speedScale"] = speed
     return voicevox_post(url, "/synthesis", {"speaker": speaker}, json.dumps(query).encode())
 
 
-def render_voicevox(chunks: list[str], output: Path, url: str, speaker: int, rate: str) -> None:
-    speed = 1 + float(rate.rstrip("%")) / 100
+def rate_to_speed(rate: str) -> float:
+    speed = (100 + float(rate.rstrip("%"))) / 100
+    if not math.isfinite(speed) or speed < 0.1:
+        raise ValueError("読み上げ速度は -90% 以上の有限値を指定してください")
+    return speed
+
+
+def list_speakers(url: str) -> list[dict]:
+    with urlopen(f"{url.rstrip('/')}/speakers", timeout=30) as response:
+        return json.load(response)
+
+
+def render_voicevox(chunks: list[str], output: Path, url: str, speaker: int, rate: str,
+                    engine_name: str = "VOICEVOX") -> None:
+    speed = rate_to_speed(rate)
+    url = url.rstrip("/")
     try:
         urlopen(f"{url}/version", timeout=5).close()
     except URLError:
-        raise SystemExit(f"VOICEVOX ENGINE に接続できません ({url})。VOICEVOX を起動してください。")
+        raise SystemExit(f"{engine_name} ENGINE に接続できません ({url})。エンジンを起動してください。")
 
     for index, (chunk, path) in enumerate(zip(chunks, chunk_paths(chunks, output)), 1):
         print(f"[{index}/{len(chunks)}] 生成中: {path} ({len(chunk)}文字)", flush=True)
@@ -137,6 +153,10 @@ def render_voicevox(chunks: list[str], output: Path, url: str, speaker: int, rat
                 with wave.open(io.BytesIO(voicevox_wav(url, piece, speaker, speed))) as src:
                     if n == 1:
                         out.setparams(src.getparams())
+                    elif (src.getnchannels(), src.getsampwidth(), src.getframerate()) != (
+                        out.getnchannels(), out.getsampwidth(), out.getframerate()
+                    ):
+                        raise ValueError("合成断片のWAV形式が一致しません")
                     out.writeframes(src.readframes(src.getnframes()))
         print(flush=True)
         subprocess.run(
@@ -149,16 +169,35 @@ def render_voicevox(chunks: list[str], output: Path, url: str, speaker: int, rat
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", help="青空文庫の作品HTML URL、または保存済みHTMLのパス")
+    parser.add_argument("source", nargs="?", help="青空文庫の作品HTML URL、または保存済みHTMLのパス")
     parser.add_argument("-o", "--output", type=Path, default=Path("book.mp3"), help="出力MP3名")
-    parser.add_argument("--engine", choices=["voicevox", "edge"], default="voicevox", help="音声合成エンジン")
-    parser.add_argument("--speaker", type=int, default=SPEAKER, help="VOICEVOXの話者ID（GET /speakers の style id）")
+    parser.add_argument("--engine", choices=["voicevox", "aivis", "edge"], default="voicevox", help="音声合成エンジン")
+    parser.add_argument("--speaker", type=int, default=None, help="GET /speakers の styles[].id（VOICEVOX既定: 14、Aivisは必須）")
     parser.add_argument("--voicevox-url", default="http://127.0.0.1:50021", help="VOICEVOX ENGINE のURL")
+    parser.add_argument("--aivis-url", default="http://127.0.0.1:10101", help="AivisSpeech Engine のURL")
+    parser.add_argument("--list-speakers", action="store_true", help="話者とスタイルIDを表示（作品指定不要）")
     parser.add_argument("--voice", default="ja-JP-NanamiNeural", help="edge用の音声。例: ja-JP-KeitaNeural")
     parser.add_argument("--rate", default="-10%", help="読み上げ速度。例: -10%% / +0%%")
     parser.add_argument("--chunk-chars", type=int, default=0, help="長編向け。指定文字数ごとに分割MP3を作る（例: 3000）")
     parser.add_argument("--preview", action="store_true", help="音声生成せず、読み上げる文字列の先頭を確認")
     args = parser.parse_args()
+    url = args.aivis_url if args.engine == "aivis" else args.voicevox_url
+    if args.list_speakers:
+        if args.engine == "edge":
+            parser.error("--list-speakers は voicevox / aivis 用です")
+        for speaker in list_speakers(url):
+            for style in speaker["styles"]:
+                print(f'{style["id"]}	{speaker["name"]}	{style["name"]}')
+        return
+    if args.source is None:
+        parser.error("作品HTMLのURLまたはパスを指定してください")
+    if args.engine != "edge":
+        try:
+            rate_to_speed(args.rate)
+        except ValueError as exc:
+            parser.error(str(exc))
+    if args.engine == "aivis" and args.speaker is None and not args.preview:
+        parser.error("AivisSpeech は --list-speakers でIDを確認し --speaker を指定してください")
     if args.output.suffix.lower() != ".mp3":
         parser.error("--output には .mp3 ファイル名を指定してください")
     text = html_to_speech_text(read_html(args.source))
@@ -168,8 +207,10 @@ def main() -> None:
         print(f"読み上げ対象: {len(text)}文字\n\n{text[:1200]}")
         return
     chunks = split_text(text, args.chunk_chars)
-    if args.engine == "voicevox":
-        render_voicevox(chunks, args.output, args.voicevox_url, args.speaker, args.rate)
+    if args.engine in ("voicevox", "aivis"):
+        render_voicevox(chunks, args.output, url,
+                        args.speaker if args.speaker is not None else SPEAKER,
+                        args.rate, "AivisSpeech" if args.engine == "aivis" else "VOICEVOX")
     else:
         asyncio.run(render_edge(chunks, args.output, args.voice, args.rate))
 
